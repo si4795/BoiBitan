@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "647738673433",
+    "project_id": "boibitan-app",
+    "storage_bucket": "boibitan-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:647738673433:android:c33d538f94dce21e1cdd88",
+        "android_client_info": {
+          "package_name": "com.boibitan.boi_bitan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBziNAwTmGKDlXIY4ulgvxiz6m9enwBbw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
