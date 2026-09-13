@@ -4,15 +4,18 @@ import 'package:flutter/foundation.dart';
 import '../data/book_catalog.dart';
 import '../models/book.dart';
 import '../utils/fuzzy_search.dart';
+import 'scraper_service.dart';
 
 /// Service for searching and aggregating books from open repositories including
-/// Internet Archive, Gutendex (Project Gutenberg), Open Library, and Google Books.
+/// Curated Bengali Scraper (Amarbooks), Internet Archive, Google Books, Gutendex,
+/// and Open Library.
 ///
-/// Applies language integrity checks to prevent cross-language mismatches.
+/// Applies language integrity checks, strict author boundaries, and junk document filtering.
 class BookApiService {
   final Dio _dio;
+  final ScraperService _scraperService;
 
-  BookApiService({Dio? dio})
+  BookApiService({Dio? dio, ScraperService? scraperService})
     : _dio =
           dio ??
           Dio(
@@ -24,7 +27,8 @@ class BookApiService {
                 'Accept': 'application/json',
               },
             ),
-          );
+          ),
+      _scraperService = scraperService ?? ScraperService();
 
   /// Detects whether the search query targets Bengali ('bn') or English ('en') content.
   /// Returns null if ambiguous or general.
@@ -41,11 +45,25 @@ class BookApiService {
       'robindro',
       'tagore',
       'sarat',
+      'saratchandra',
+      'chattopadhyay',
+      'chatterjee',
       'chandra',
       'humayun',
       'ahmed',
       'sharat',
       'bibhutibhushan',
+      'bandyopadhyay',
+      'tarasankar',
+      'manik',
+      'zafar',
+      'iqbal',
+      'bankim',
+      'sukumar',
+      'satyajit',
+      'shirshendu',
+      'sunil',
+      'gangopadhyay',
       'kazi',
       'nazrul',
       'devdas',
@@ -53,6 +71,7 @@ class BookApiService {
       'shesher',
       'kobita',
       'srikanta',
+      'anandamath',
       'pather',
       'panchali',
       'chokher',
@@ -143,18 +162,38 @@ class BookApiService {
     return true;
   }
 
-  /// Searches books across multiple public domain and open digital libraries:
-  /// Archive.org, Gutendex (Project Gutenberg), Open Library, and Google Books.
+  /// Searches books across curated Bengali repositories (Amarbooks),
+  /// Archive.org, Google Books, Gutendex (Project Gutenberg), and Open Library.
+  ///
+  /// Prioritizes curated Bengali scraping for Bengali queries, and Google Books
+  /// for English/Global queries, while strictly eliminating junk documents and
+  /// enforcing strict author boundaries.
   Future<List<Book>> searchBooks(String query, {int limit = 25}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
 
     final targetLang = detectTargetLanguage(trimmed);
+    final canonicalAuthor = FuzzySearch.detectCanonicalAuthor(trimmed);
+    final isBengali = targetLang == 'bn';
+
     final List<Book> combined = [];
     final Set<String> seenKeys = {};
 
     void addUnique(List<Book> candidates) {
       for (final b in candidates) {
+        // 1. Enforce junk document filter (>40 pages, no thesis/research/fanfiction)
+        if (FuzzySearch.isJunkDocument(b)) {
+          continue;
+        }
+
+        // 2. Enforce strict author boundary
+        if (!FuzzySearch.satisfiesAuthorBoundary(
+          query: trimmed,
+          candidateAuthor: b.author,
+        )) {
+          continue;
+        }
+
         final key =
             '${b.title.toLowerCase().trim()}_${b.author.toLowerCase().trim()}';
         if (seenKeys.add(key)) {
@@ -163,61 +202,126 @@ class BookApiService {
       }
     }
 
-    // Prioritize Archive.org for Bengali queries
-    if (targetLang == 'bn') {
+    if (isBengali) {
+      // Priority 1: Curated Bengali Background Scraper (Amarbooks)
       try {
-        final archiveBooks = await _searchArchiveOrg(
+        final scrapedBooks = await _scraperService.scrapeBooks(
           trimmed,
           limit: limit,
-          targetLanguage: targetLang,
         );
-        addUnique(archiveBooks);
+        addUnique(scrapedBooks);
       } catch (e) {
-        debugPrint('Archive.org search notice: $e');
+        debugPrint('Scraper search notice: $e');
+      }
+
+      // Priority 2: Archive.org strictly filtered with creator & Bengali language tags
+      if (combined.length < limit) {
+        try {
+          final archiveBooks = await _searchArchiveOrg(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'bn',
+            canonicalAuthor: canonicalAuthor,
+          );
+          addUnique(archiveBooks);
+        } catch (e) {
+          debugPrint('Archive.org search notice: $e');
+        }
+      }
+
+      // Priority 3: Google Books Volume API with Bengali filter
+      if (combined.length < limit) {
+        try {
+          final googleBooks = await _searchGoogleBooks(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'bn',
+            canonicalAuthor: canonicalAuthor,
+          );
+          addUnique(googleBooks);
+        } catch (e) {
+          debugPrint('Google Books search notice: $e');
+        }
+      }
+
+      // Priority 4: Open Library
+      if (combined.length < 5) {
+        try {
+          final olBooks = await _searchOpenLibrary(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'bn',
+          );
+          addUnique(olBooks);
+        } catch (e) {
+          debugPrint('Open Library search notice: $e');
+        }
+      }
+    } else {
+      // Global / English queries:
+      // Priority 1: Google Books Volume API with inauthor/title targeting
+      try {
+        final googleBooks = await _searchGoogleBooks(
+          trimmed,
+          limit: limit,
+          targetLanguage: 'en',
+          canonicalAuthor: canonicalAuthor,
+        );
+        addUnique(googleBooks);
+      } catch (e) {
+        debugPrint('Google Books search notice: $e');
+      }
+
+      // Priority 2: Gutendex (Project Gutenberg)
+      if (combined.length < limit) {
+        try {
+          final gutenbergBooks = await _searchGutendex(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'en',
+          );
+          addUnique(gutenbergBooks);
+        } catch (e) {
+          debugPrint('Gutendex search notice: $e');
+        }
+      }
+
+      // Priority 3: Archive.org
+      if (combined.length < limit) {
+        try {
+          final archiveBooks = await _searchArchiveOrg(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'en',
+            canonicalAuthor: canonicalAuthor,
+          );
+          addUnique(archiveBooks);
+        } catch (e) {
+          debugPrint('Archive.org search notice: $e');
+        }
+      }
+
+      // Priority 4: Open Library
+      if (combined.length < 5) {
+        try {
+          final olBooks = await _searchOpenLibrary(
+            trimmed,
+            limit: limit,
+            targetLanguage: 'en',
+          );
+          addUnique(olBooks);
+        } catch (e) {
+          debugPrint('Open Library search notice: $e');
+        }
       }
     }
 
-    // Query Google Books
-    try {
-      final googleBooks = await _searchGoogleBooks(
-        trimmed,
-        limit: limit,
-        targetLanguage: targetLang,
-      );
-      addUnique(googleBooks);
-    } catch (e) {
-      debugPrint('Google Books search notice: $e');
-    }
-
-    // Query Gutendex for public domain literature
-    if (targetLang != 'bn' || combined.length < 5) {
-      try {
-        final gutenbergBooks = await _searchGutendex(
-          trimmed,
-          limit: limit,
-          targetLanguage: targetLang,
-        );
-        addUnique(gutenbergBooks);
-      } catch (e) {
-        debugPrint('Gutendex search notice: $e');
-      }
-    }
-
-    // Fallback to Open Library when result count is low
-    if (combined.length < 4) {
-      try {
-        final olBooks = await _searchOpenLibrary(
-          trimmed,
-          limit: limit,
-          targetLanguage: targetLang,
-        );
-        addUnique(olBooks);
-      } catch (e) {
-        debugPrint('Open Library search notice: $e');
-      }
-    }
-
-    return FuzzySearch.rankBooks(combined, trimmed, threshold: 0.15);
+    return FuzzySearch.rankBooks(
+      combined,
+      trimmed,
+      threshold: 0.15,
+      filterJunk: true,
+    );
   }
 
   /// Generates live auto-suggestions using local catalog fuzzy matching
@@ -325,14 +429,58 @@ class BookApiService {
     String query, {
     int limit = 25,
     String? targetLanguage,
+    String? canonicalAuthor,
   }) async {
-    final cleanQuery = Uri.encodeComponent(query);
+    final cleanQuery = query.replaceAll('"', '').trim();
+    final isBengaliScript = RegExp(r'[\u0980-\u09FF]').hasMatch(cleanQuery);
+    final isBengaliTarget = targetLanguage == 'bn' || isBengaliScript;
+
+    // When querying Archive.org API for Bengali book titles or authors, append language filter priority:
+    // `AND (language:(bengali OR ben) OR mediatype:(texts))` to prioritize Bengali versions first.
+    String languageClause = '';
+    if (isBengaliTarget) {
+      languageClause = ' AND (language:(bengali OR ben) OR mediatype:(texts))';
+    }
+
+    String creatorClause = 'creator:("$cleanQuery")';
+    if (canonicalAuthor != null && canonicalAuthor.isNotEmpty) {
+      creatorClause = 'creator:("$canonicalAuthor") OR creator:("$cleanQuery")';
+    }
+
+    final q =
+        '(title:("$cleanQuery") OR $creatorClause) AND mediatype:(texts) AND format:(PDF)$languageClause';
     final uri =
-        'https://archive.org/advancedsearch.php?q=$cleanQuery+AND+mediatype:(texts)&fl[]=identifier,title,creator,year,description,downloads,language,format&output=json&rows=$limit';
+        'https://archive.org/advancedsearch.php?q=${Uri.encodeComponent(q)}&fl[]=identifier,title,creator,year,description,downloads,language,format&sort[]=downloads+desc&output=json&rows=$limit';
 
     final response = await _dio.get<Map<String, dynamic>>(uri);
     final docs = response.data?['response']?['docs'] as List?;
     if (docs == null) return [];
+
+    // For queries entered in Bengali script or literature, strictly prioritize records with language tags ben or bengali
+    if (isBengaliTarget) {
+      docs.sort((a, b) {
+        if (a is! Map || b is! Map) return 0;
+        final aLang = (a['language'] ?? '').toString().toLowerCase();
+        final bLang = (b['language'] ?? '').toString().toLowerCase();
+        final aIsBen = aLang.contains('ben') || aLang.contains('bengali');
+        final bIsBen = bLang.contains('ben') || bLang.contains('bengali');
+        if (aIsBen && !bIsBen) return -1;
+        if (!aIsBen && bIsBen) return 1;
+
+        if (isBengaliScript) {
+          final aTitle = (a['title'] ?? '').toString();
+          final bTitle = (b['title'] ?? '').toString();
+          final aHasBn = RegExp(r'[\u0980-\u09FF]').hasMatch(aTitle);
+          final bHasBn = RegExp(r'[\u0980-\u09FF]').hasMatch(bTitle);
+          if (aHasBn && !bHasBn) return -1;
+          if (!aHasBn && bHasBn) return 1;
+        }
+
+        final aDl = (a['downloads'] is num) ? (a['downloads'] as num) : 0;
+        final bDl = (b['downloads'] is num) ? (b['downloads'] as num) : 0;
+        return bDl.compareTo(aDl);
+      });
+    }
 
     final List<Book> books = [];
     for (final doc in docs) {
@@ -474,14 +622,20 @@ class BookApiService {
     return books;
   }
 
-  /// Queries Google Books API with access checks and language filtering.
+  /// Queries Google Books API with access checks, high-res covers, and language filtering.
   Future<List<Book>> _searchGoogleBooks(
     String query, {
     int limit = 25,
     String? targetLanguage,
+    String? canonicalAuthor,
   }) async {
+    String apiQuery = query;
+    if (canonicalAuthor != null && canonicalAuthor.isNotEmpty) {
+      apiQuery = 'inauthor:"$canonicalAuthor"';
+    }
+    final langParam = targetLanguage == 'bn' ? '&langRestrict=bn' : '';
     final uri =
-        'https://www.googleapis.com/books/v1/volumes?q=${Uri.encodeComponent(query)}&maxResults=$limit';
+        'https://www.googleapis.com/books/v1/volumes?q=${Uri.encodeComponent(apiQuery)}$langParam&maxResults=$limit';
     final response = await _dio.get<Map<String, dynamic>>(uri);
     final items = response.data?['items'] as List?;
     if (items == null) return [];
@@ -512,6 +666,10 @@ class BookApiService {
             (info['description'] as String?)?.trim() ??
             'Published by ${info['publisher'] ?? 'Google Books'}.';
         final pageCount = (info['pageCount'] as num?)?.toInt() ?? 200;
+
+        // Discard junk single-page documents / short samples
+        if (pageCount <= 40) continue;
+
         final rawYear = info['publishedDate']?.toString() ?? '2020';
         final yearMatch = RegExp(r'\d{4}').firstMatch(rawYear);
         final pubYear = yearMatch != null
@@ -521,9 +679,20 @@ class BookApiService {
         String cover = '';
         final imgLinks = info['imageLinks'] as Map<String, dynamic>?;
         if (imgLinks != null) {
-          cover = (imgLinks['thumbnail'] ?? imgLinks['smallThumbnail'] ?? '')
-              .toString()
-              .replaceFirst('http://', 'https://');
+          String rawImg =
+              (imgLinks['extraLarge'] ??
+                      imgLinks['large'] ??
+                      imgLinks['medium'] ??
+                      imgLinks['thumbnail'] ??
+                      imgLinks['smallThumbnail'] ??
+                      '')
+                  .toString()
+                  .replaceFirst('http://', 'https://');
+          if (rawImg.contains('zoom=1')) {
+            rawImg = rawImg.replaceAll('zoom=1', 'zoom=2');
+          }
+          rawImg = rawImg.replaceAll('&edge=curl', '');
+          cover = rawImg;
         }
 
         final previewUrl =
@@ -629,8 +798,6 @@ class BookApiService {
         if (iaList is List && iaList.isNotEmpty) {
           final iaId = iaList.first.toString();
           downloadUrl = 'https://archive.org/download/$iaId/$iaId.pdf';
-        } else {
-          downloadUrl = 'https://openlibrary.org$rawKey';
         }
 
         books.add(

@@ -55,6 +55,8 @@ class AppTranslations {
       'shelf_translated': 'অনূদিত বিশ্বসাহিত্য',
       'shelf_english_classics': 'জনপ্রিয় ইংরেজি ক্লাসিকস',
       'no_books_found': 'কোনো বই খুঁজে পাওয়া যায়নি',
+      'no_category_results': 'এই ক্যাটাগরিতে কোনো ফলাফল পাওয়া যায়নি',
+      'reset_category_filter': 'সব ফলাফল দেখুন',
       'try_another_search': 'অন্য কোনো নাম বা লেখকের নাম দিয়ে অনুসন্ধান করুন',
 
       // Book Details
@@ -67,6 +69,10 @@ class AppTranslations {
       'reviews': 'মতামত',
       'synopsis': 'বইয়ের সারসংক্ষেপ',
       'read_now': 'এখনই পড়ুন',
+      'read_book': 'বইটি পড়ুন',
+      'digital_copy_unavailable': 'এই বইটির ডিজিটাল কপি বর্তমানে উপলব্ধ নেই',
+      'digital_copy_load_failed': 'বইটির ডিজিটাল কপি লোড করা সম্ভব হয়নি',
+      'tier3_no_copy_info': 'নোট: এই বইটির ডিজিটাল কপি বর্তমানে সংরক্ষিত নেই।',
       'download_pdf': 'পিডিএফ ডাউনলোড',
       'downloading': 'ডাউনলোড হচ্ছে...',
       'download_complete': 'ডাউনলোড সম্পন্ন!',
@@ -145,15 +151,13 @@ class AppTranslations {
       'login_link': 'এখানে লগইন করুন',
       'password_mismatch': 'উভয় পাসওয়ার্ড একই হতে হবে',
       'auth_invalid': 'ভুল ইমেইল বা পাসওয়ার্ড',
-      'auth_user_not_found':
-          'এই ইমেইলে কোনো অ্যাকাউন্ট পাওয়া যায়নি। দয়া করে প্রথমে নিবন্ধন করুন।',
+      'auth_user_not_found': 'এই ইমেইলে কোনো একাউন্ট পাওয়া যায়নি',
       'auth_invalid_email': 'সঠিক ইমেইল ঠিকানা দিন',
       'auth_invalid_email_hint':
           'একটি সঠিক ইমেইল ঠিকানা লিখুন (e.g. name@example.com)',
       'auth_invalid_credentials':
           'ভুল ইমেইল বা পাসওয়ার্ড অথবা অ্যাকাউন্ট তৈরি করা নেই',
-      'auth_wrong_password':
-          'ভুল পাসওয়ার্ড। দয়া করে সঠিক পাসওয়ার্ড দিয়ে চেষ্টা করুন।',
+      'auth_wrong_password': 'ভুল পাসওয়ার্ড, আবার চেষ্টা করুন',
       'auth_email_in_use':
           'এই ইমেইল দিয়ে ইতিমধ্যেই একটি অ্যাকাউন্ট রয়েছে। দয়া করে লগইন করুন।',
       'google_account_picker_title': 'গুগল অ্যাকাউন্ট নির্বাচন করুন',
@@ -263,6 +267,8 @@ class AppTranslations {
       'shelf_translated': 'Translated Masterpieces',
       'shelf_english_classics': 'English Classics Collection',
       'no_books_found': 'No books found',
+      'no_category_results': 'No results found in this category',
+      'reset_category_filter': 'View all results',
       'try_another_search': 'Try searching with another title or author name',
 
       // Book Details
@@ -275,6 +281,12 @@ class AppTranslations {
       'reviews': 'Reviews',
       'synopsis': 'Book Synopsis',
       'read_now': 'Read Online',
+      'read_book': 'Read Book',
+      'digital_copy_unavailable':
+          'Digital copy of this book is currently unavailable',
+      'digital_copy_load_failed': 'Failed to load digital copy of this book',
+      'tier3_no_copy_info':
+          'Note: A digital copy of this book is currently unavailable.',
       'download_pdf': 'Download PDF',
       'downloading': 'Downloading...',
       'download_complete': 'Download Finished!',
@@ -354,8 +366,7 @@ class AppTranslations {
       'login_link': 'Sign in here',
       'password_mismatch': 'Passwords do not match',
       'auth_invalid': 'Invalid email or password',
-      'auth_user_not_found':
-          'No account found with this email. Please sign up first.',
+      'auth_user_not_found': 'No account found with this email',
       'auth_invalid_email': 'Enter a valid email address',
       'auth_invalid_email_hint':
           'Enter a valid email address (e.g. name@example.com)',

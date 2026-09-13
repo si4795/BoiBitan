@@ -15,17 +15,22 @@ import 'package:boi_bitan/models/user_book_progress.dart';
 import 'package:boi_bitan/repositories/firestore_library_repository.dart';
 import 'package:boi_bitan/screens/auth/login_screen.dart';
 import 'package:boi_bitan/screens/auth/signup_screen.dart';
+import 'package:boi_bitan/screens/book_details_screen.dart';
 import 'package:boi_bitan/screens/home_screen.dart';
 import 'package:boi_bitan/screens/my_library_screen.dart';
+import 'package:boi_bitan/screens/web_reader_screen.dart';
 import 'package:boi_bitan/services/auth_service.dart';
 import 'package:boi_bitan/services/book_api_service.dart';
+import 'package:boi_bitan/services/scraper_service.dart';
 import 'package:boi_bitan/services/storage_service.dart';
 import 'package:boi_bitan/theme/theme_notifier.dart';
 import 'package:boi_bitan/utils/fuzzy_search.dart';
+import 'package:boi_bitan/widgets/typography_cover.dart';
 
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    ScraperService.mockScraperOverride = null;
     AuthService.globalEmailSenderOverride = ({
       required toEmail,
       required otpCode,
@@ -94,6 +99,11 @@ void main() {
 
       expect(res.isSuccess, isFalse);
       expect(res.status, equals(AuthResultStatus.userNotFound));
+      expect(res.errorMessageKey, equals('auth_user_not_found'));
+      expect(
+        AppTranslations.translate(res.errorMessageKey!, 'bn'),
+        equals('এই ইমেইলে কোনো একাউন্ট পাওয়া যায়নি'),
+      );
       expect(authService.isLoggedIn, isFalse);
     });
 
@@ -111,6 +121,11 @@ void main() {
 
       expect(res.isSuccess, isFalse);
       expect(res.status, equals(AuthResultStatus.wrongPassword));
+      expect(res.errorMessageKey, equals('auth_wrong_password'));
+      expect(
+        AppTranslations.translate(res.errorMessageKey!, 'bn'),
+        equals('ভুল পাসওয়ার্ড, আবার চেষ্টা করুন'),
+      );
       expect(authService.isLoggedIn, isFalse);
     });
 
@@ -689,6 +704,47 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'LoginScreen email input does not trigger client-side pre-check or show Please sign up first',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+        final authService = AuthService(storageService: storageService);
+        await authService.init();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LoginScreen(
+              authService: authService,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final emailFieldFinder = find.byType(TextField).at(0);
+        await tester.enterText(
+          emailFieldFinder,
+          'firebase_existing_user@domain.com',
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+
+        expect(
+          find.text(
+            AppTranslations.translate('auth_please_signup_first', 'bn'),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.text(
+            AppTranslations.translate('auth_please_signup_first', 'en'),
+          ),
+          findsNothing,
+        );
+      },
+    );
   });
 
   group('Firestore Domain Models Serialization & Deserialization Tests', () {
@@ -1214,6 +1270,648 @@ void main() {
 
       expect(find.byType(ConsumerLocaleButton), findsOneWidget);
     });
+  });
+
+  group('Decoupled Search & In-App Reader Polish Tests', () {
+    test('Catalog contains Franz Kafka and Muhammed Zafar Iqbal works', () {
+      final kafka = BookCatalog.getById('metamorphosis');
+      expect(kafka, isNotNull);
+      expect(kafka!.author, contains('Kafka'));
+      expect(kafka.downloadUrl.toLowerCase(), contains('.pdf'));
+
+      final zafarIqbal = BookCatalog.getById('ruhan_ruhan');
+      expect(zafarIqbal, isNotNull);
+      expect(zafarIqbal!.author, contains('Zafar Iqbal'));
+      expect(zafarIqbal.downloadUrl.toLowerCase(), contains('.pdf'));
+    });
+
+    test('Searching Kafka or Zafar Iqbal matches globally across catalog', () {
+      final kafkaMatches = BookCatalog.search('Kafka');
+      expect(kafkaMatches.any((b) => b.id == 'metamorphosis'), isTrue);
+
+      final zafarMatches = BookCatalog.search('জাফর ইকবাল');
+      expect(zafarMatches.any((b) => b.author.contains('Zafar Iqbal')), isTrue);
+    });
+
+    testWidgets(
+      'BookDetailsScreen renders read_book primary button and TypographyCover fallback',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+
+        const testBookWithoutCover = Book(
+          id: 'no_cover_test',
+          title: 'Custom Title',
+          titleBn: 'কাস্টম শিরোনাম',
+          author: 'Unknown Author',
+          authorBn: 'অজানা লেখক',
+          category: 'Classic',
+          categoryBn: 'চিরায়ত',
+          description: 'Testing book without cover image.',
+          descriptionBn: 'কভার ছাড়া বইয়ের বিবরণ।',
+          coverUrl: '',
+          rating: 4.5,
+          reviewCount: 10,
+          pageCount: 120,
+          fileSize: '2.5 MB',
+          publicationYear: 2020,
+          downloadUrl: 'https://archive.org/download/test/test.pdf',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: testBookWithoutCover,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TypographyCover), findsOneWidget);
+        expect(find.text('বইটি পড়ুন'), findsOneWidget);
+      },
+    );
+
+    test('Devdas in BookCatalog points to verified Bengali scan in.ernet.dli.2015.302106', () {
+      final devdas = BookCatalog.getById('devdas');
+      expect(devdas, isNotNull);
+      expect(devdas!.downloadUrl, contains('2015.302106.Devdas.pdf'));
+      expect(devdas.previewUrl, contains('in.ernet.dli.2015.302106'));
+      expect(devdas.pageCount, equals(114));
+      expect(devdas.fileSize, equals('4.1 MB'));
+    });
+
+    test('detectTargetLanguage detects Bengali for Bengali literature authors and titles', () {
+      expect(
+        BookApiService.detectTargetLanguage('Sarat Chandra Chattopadhyay'),
+        equals('bn'),
+      );
+      expect(
+        BookApiService.detectTargetLanguage('Rabindranath Tagore'),
+        equals('bn'),
+      );
+      expect(
+        BookApiService.detectTargetLanguage('Muhammed Zafar Iqbal'),
+        equals('bn'),
+      );
+      expect(BookApiService.detectTargetLanguage('Devdas'), equals('bn'));
+      expect(BookApiService.detectTargetLanguage('দেবদাস'), equals('bn'));
+      expect(
+        BookApiService.detectTargetLanguage('শরৎচন্দ্র চট্টোপাধ্যায়'),
+        equals('bn'),
+      );
+    });
+
+    testWidgets(
+      'BookDetailsScreen unified action opens WebReaderScreen for web portal and shows snackbar for empty URL',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+
+        const testWebBook = Book(
+          id: 'web_portal_test',
+          title: 'Web Portal Book',
+          titleBn: 'ওয়েব পোর্টাল বই',
+          author: 'Author Name',
+          authorBn: 'লেখকের নাম',
+          category: 'Collection',
+          categoryBn: 'সংগ্রহ',
+          description: 'A test book with web reader URL.',
+          descriptionBn: 'ওয়েব রিডার বই।',
+          coverUrl: '',
+          rating: 4.5,
+          reviewCount: 10,
+          pageCount: 150,
+          fileSize: '3 MB',
+          publicationYear: 2021,
+          downloadUrl: '',
+          previewUrl: 'https://archive.org/details/example_book',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: testWebBook,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Consistent UI check
+        expect(find.text('বইটি পড়ুন'), findsOneWidget);
+        expect(find.text('পিডিএফ ডাউনলোড'), findsOneWidget);
+        expect(find.text('Webview'), findsNothing);
+        expect(find.text('External'), findsNothing);
+
+        // Tap "বইটি পড়ুন" opens WebReaderScreen
+        await tester.tap(find.text('বইটি পড়ুন'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(WebReaderScreen), findsOneWidget);
+
+        // Pop back to details screen
+        await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+        await tester.pumpAndSettle();
+        expect(find.byType(BookDetailsScreen), findsOneWidget);
+
+        // Test Tier 3: invalid/empty url displays clean bottom info card without active reading button
+        const testEmptyBook = Book(
+          id: 'empty_url_test',
+          title: 'Empty URL Book',
+          titleBn: 'খালি লিংক বই',
+          author: 'Author',
+          authorBn: 'লেখক',
+          category: 'Test',
+          categoryBn: 'টেস্ট',
+          description: 'Desc',
+          descriptionBn: 'বিবরণ',
+          coverUrl: '',
+          rating: 4.0,
+          reviewCount: 5,
+          pageCount: 50,
+          fileSize: '1 MB',
+          publicationYear: 2022,
+          downloadUrl: '',
+          previewUrl: '',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: testEmptyBook,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('বইটি পড়ুন'), findsNothing);
+        expect(
+          find.text('নোট: এই বইটির ডিজিটাল কপি বর্তমানে সংরক্ষিত নেই।'),
+          findsOneWidget,
+        );
+      },
+    );
+  });
+
+  group('Strict 3-Tier Book Reading Flow & Dynamic Category Filter Tests', () {
+    testWidgets(
+      'Tier 3 metadata-only book displays info card and no read button',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+
+        const metadataOnlyBook = Book(
+          id: 'tier3_book',
+          title: 'Rare Manuscript',
+          titleBn: 'বিরল পাণ্ডুলিপি',
+          author: 'Unknown Scribe',
+          authorBn: 'অজ্ঞাত লেখক',
+          category: 'History',
+          categoryBn: 'ইতিহাস',
+          description: 'Only metadata exists in public domain catalogs.',
+          descriptionBn: 'পাবলিক ডোমেইনে শুধুমাত্র তথ্য সংরক্ষিত আছে।',
+          coverUrl: '',
+          rating: 4.0,
+          reviewCount: 2,
+          pageCount: 150,
+          fileSize: '0 MB',
+          publicationYear: 1910,
+          downloadUrl: '',
+          previewUrl: '',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: metadataOnlyBook,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('বইটি পড়ুন'), findsNothing);
+        expect(
+          find.text('নোট: এই বইটির ডিজিটাল কপি বর্তমানে সংরক্ষিত নেই।'),
+          findsOneWidget,
+        );
+        expect(find.byIcon(Icons.info_outline_rounded), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Tier 2 web stream book displays read button and launches WebReaderScreen',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+
+        const webStreamBook = Book(
+          id: 'tier2_book',
+          title: 'Archive Book Stream',
+          titleBn: 'আর্কাইভ বই',
+          author: 'Archived Author',
+          authorBn: 'আর্কাইভ লেখক',
+          category: 'Literature',
+          categoryBn: 'সাহিত্য',
+          description: 'Available on Internet Archive book reader portal.',
+          descriptionBn: 'ইন্টারনেট আর্কাইভে পাঠযোগ্য।',
+          coverUrl: '',
+          rating: 4.5,
+          reviewCount: 12,
+          pageCount: 200,
+          fileSize: '5 MB',
+          publicationYear: 1950,
+          downloadUrl: 'https://archive.org/details/test_stream_id',
+          previewUrl: 'https://archive.org/details/test_stream_id',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: webStreamBook,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        final readBtn = find.text('বইটি পড়ুন');
+        expect(readBtn, findsOneWidget);
+
+        await tester.tap(readBtn);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(find.byType(WebReaderScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'HomeScreen category chips dynamically filter active search results and category_all resets',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+        final authService = AuthService(storageService: storageService);
+        await authService.init();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(
+                authService: authService,
+                storageService: storageService,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Enter search query "রবীন্দ্রনাথ"
+        final searchField = find.byType(TextField).first;
+        await tester.enterText(searchField, 'রবীন্দ্রনাথ');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+
+        // Search results should include Gitanjali and Shesher Kobita
+        expect(find.text('Gitanjali'), findsOneWidget);
+        expect(find.text('Shesher Kobita'), findsOneWidget);
+
+        // Unfocus search bar to dismiss suggestion overlay
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Now tap on a specific category chip: "বাংলা উপন্যাস" (category_bangla_novel)
+        final novelChip = find.text('বাংলা উপন্যাস');
+        expect(novelChip, findsWidgets);
+        await tester.tap(novelChip.first);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Shesher Kobita (novel) is present, while Gitanjali (poetry/চিরায়ত কবিতা) is filtered out
+        expect(find.text('Shesher Kobita'), findsOneWidget);
+        expect(find.text('Gitanjali'), findsNothing);
+
+        // Tap "সব বই" (category_all) chip to restore all search results
+        final allChip = find.text('সব বই');
+        expect(allChip, findsWidgets);
+        await tester.tap(allChip.first);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Both should be visible again
+        expect(find.text('Gitanjali'), findsOneWidget);
+        expect(find.text('Shesher Kobita'), findsOneWidget);
+      },
+    );
+  });
+
+  group('Curated Scraper & HTML Parsing Tests', () {
+    test('parseAmarbooksHtml parses genuine book titles, authors, covers, and direct links', () {
+      const sampleHtml = '''
+        <html>
+          <body>
+            <article class="post">
+              <h2 class="entry-title">
+                <a href="https://amarbooks.org/book/shesher-kobita-rabindranath-tagore/">শেষের কবিতা - রবীন্দ্রনাথ ঠাকুর</a>
+              </h2>
+              <div class="post-thumbnail">
+                <img src="https://amarbooks.org/covers/shesher-kobita.jpg" alt="Cover" />
+              </div>
+              <a href="https://amarbooks.org/download/shesher-kobita.pdf" class="pdf-link">ডাউনলোড</a>
+            </article>
+          </body>
+        </html>
+      ''';
+
+      final books = ScraperService.parseAmarbooksHtml(sampleHtml);
+      expect(books.length, equals(1));
+      final book = books.first;
+      expect(book.title, equals('শেষের কবিতা'));
+      expect(book.author, equals('রবীন্দ্রনাথ ঠাকুর'));
+      expect(book.coverUrl, contains('shesher-kobita.jpg'));
+      expect(book.downloadUrl, contains('shesher-kobita.pdf'));
+      expect(book.previewUrl, contains('shesher-kobita-rabindranath-tagore'));
+      expect(book.pageCount, greaterThan(40));
+    });
+
+    test('parseAmarbooksHtml sanitizes navigation links, tags, category archives and ads', () {
+      const junkHtml = '''
+        <html>
+          <body>
+            <article class="post">
+              <h2 class="entry-title">
+                <a href="https://amarbooks.org/category/novel/">উপন্যাস আর্কাইভ</a>
+              </h2>
+            </article>
+            <article class="post">
+              <h2 class="entry-title">
+                <a href="https://amarbooks.org/tag/fiction/">ফিকশন ট্যাগ</a>
+              </h2>
+            </article>
+            <article class="post">
+              <h2 class="entry-title">
+                <a href="https://amarbooks.org/page/2/">Page 2</a>
+              </h2>
+            </article>
+            <article class="post">
+              <h2 class="entry-title">
+                <a href="https://amarbooks.org/privacy-policy/">Privacy Policy</a>
+              </h2>
+            </article>
+          </body>
+        </html>
+      ''';
+
+      final books = ScraperService.parseAmarbooksHtml(junkHtml);
+      expect(books, isEmpty);
+    });
+
+    test(
+      'scrapeBooks handles empty query and network errors gracefully',
+      () async {
+        final scraper = ScraperService();
+        final emptyResults = await scraper.scrapeBooks('');
+        expect(emptyResults, isEmpty);
+      },
+    );
+  });
+
+  group('Author Normalization, Strict Boundary & Junk Document Tests', () {
+    test('detectCanonicalAuthor normalizes phonetic typos and English transliterations', () {
+      expect(
+        FuzzySearch.detectCanonicalAuthor('jk rawling'),
+        equals('J.K. Rowling'),
+      );
+      expect(
+        FuzzySearch.detectCanonicalAuthor('shorot chondro'),
+        equals('Sarat Chandra Chattopadhyay'),
+      );
+      expect(FuzzySearch.detectCanonicalAuthor('kafk'), equals('Franz Kafka'));
+      expect(
+        FuzzySearch.detectCanonicalAuthor('robindro'),
+        equals('Rabindranath Tagore'),
+      );
+      expect(
+        FuzzySearch.detectCanonicalAuthor('জাফর ইকবাল'),
+        equals('Muhammed Zafar Iqbal'),
+      );
+    });
+
+    test('satisfiesAuthorBoundary strictly enforces author boundaries', () {
+      // Sarat Chandra searches accept Sarat Chandra variants
+      expect(
+        FuzzySearch.satisfiesAuthorBoundary(
+          query: 'Sarat Chandra',
+          candidateAuthor: 'Sarat Chandra Chattopadhyay',
+        ),
+        isTrue,
+      );
+      expect(
+        FuzzySearch.satisfiesAuthorBoundary(
+          query: 'শরৎচন্দ্র',
+          candidateAuthor: 'শরৎচন্দ্র চট্টোপাধ্যায়',
+        ),
+        isTrue,
+      );
+
+      // Sarat Chandra searches must strictly reject other known authors
+      expect(
+        FuzzySearch.satisfiesAuthorBoundary(
+          query: 'Sarat Chandra',
+          candidateAuthor: 'Bankim Chandra Chattopadhyay',
+        ),
+        isFalse,
+      );
+      expect(
+        FuzzySearch.satisfiesAuthorBoundary(
+          query: 'Sarat Chandra',
+          candidateAuthor: 'Rabindranath Tagore',
+        ),
+        isFalse,
+      );
+      expect(
+        FuzzySearch.satisfiesAuthorBoundary(
+          query: 'শরৎচন্দ্র',
+          candidateAuthor: 'হুমায়ূন আহমেদ',
+        ),
+        isFalse,
+      );
+    });
+
+    test('isJunkDocument correctly identifies <= 40 pages and academic/fanfiction content', () {
+      const shortBook = Book(
+        id: 'short_doc',
+        title: 'Pamphlet Title',
+        titleBn: 'প্যামফ্লেট',
+        author: 'Author',
+        authorBn: 'লেখক',
+        category: 'General',
+        categoryBn: 'সাধারণ',
+        description: 'Short text',
+        descriptionBn: 'সংক্ষিপ্ত লেখা',
+        coverUrl: '',
+        rating: 4.0,
+        reviewCount: 1,
+        pageCount: 18,
+        fileSize: '0.5 MB',
+        publicationYear: 2020,
+        downloadUrl: 'https://example.com/doc.pdf',
+      );
+      expect(FuzzySearch.isJunkDocument(shortBook), isTrue);
+
+      const thesisBook = Book(
+        id: 'thesis_doc',
+        title: 'A Critical Thesis and Analysis of Classic Novels',
+        titleBn: 'থিসিস পেপার',
+        author: 'Academic Researcher',
+        authorBn: 'গবেষক',
+        category: 'Research',
+        categoryBn: 'গবেষণা',
+        description: 'Research dissertation on literature.',
+        descriptionBn: 'গবেষণা বিবরণী',
+        coverUrl: '',
+        rating: 4.0,
+        reviewCount: 1,
+        pageCount: 120,
+        fileSize: '2.5 MB',
+        publicationYear: 2021,
+        downloadUrl: 'https://example.com/thesis.pdf',
+      );
+      expect(FuzzySearch.isJunkDocument(thesisBook), isTrue);
+
+      const legitimateBook = Book(
+        id: 'valid_novel',
+        title: 'The Great Novel',
+        titleBn: 'অমর উপন্যাস',
+        author: 'Famous Author',
+        authorBn: 'বিখ্যাত লেখক',
+        category: 'Novel',
+        categoryBn: 'উপন্যাস',
+        description: 'A genuine literary novel with compelling narrative.',
+        descriptionBn: 'কালজয়ী এক সাহিত্য আখ্যান।',
+        coverUrl: '',
+        rating: 4.8,
+        reviewCount: 50,
+        pageCount: 220,
+        fileSize: '6.0 MB',
+        publicationYear: 1950,
+        downloadUrl: 'https://example.com/novel.pdf',
+      );
+      expect(FuzzySearch.isJunkDocument(legitimateBook), isFalse);
+    });
+
+    testWidgets(
+      'BookDetailsScreen rejects mismatched author bindings and falls back to Tier 3',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+
+        // Book authored by Sarat Chandra, but pointing to Rabindranath Tagore download/preview URL
+        const mismatchedBook = Book(
+          id: 'mismatched_test',
+          title: 'Pother Dabi',
+          titleBn: 'পথের দাবী',
+          author: 'Sarat Chandra Chattopadhyay',
+          authorBn: 'শরৎচন্দ্র চট্টোপাধ্যায়',
+          category: 'Bengali Novels',
+          categoryBn: 'বাংলা উপন্যাস',
+          description: 'Testing mismatched PDF binding.',
+          descriptionBn: 'বিবরণ',
+          coverUrl: '',
+          rating: 4.8,
+          reviewCount: 10,
+          pageCount: 150,
+          fileSize: '4.5 MB',
+          publicationYear: 1926,
+          downloadUrl: 'https://archive.org/download/rabindranath_tagore_works/gitanjali.pdf',
+          previewUrl: 'https://archive.org/details/rabindranath_tagore_works',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BookDetailsScreen(
+              book: mismatchedBook,
+              storageService: storageService,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Reading button must not appear, and Tier 3 info card must be rendered
+        expect(find.text('বইটি পড়ুন'), findsNothing);
+        expect(
+          find.text('নোট: এই বইটির ডিজিটাল কপি বর্তমানে সংরক্ষিত নেই।'),
+          findsOneWidget,
+        );
+      },
+    );
+  });
+
+  group('Reactive Category Chip In-Memory Filter Empty State Tests', () {
+    testWidgets(
+      'HomeScreen displays no_category_results inline message and resets with button',
+      (WidgetTester tester) async {
+        final storageService = StorageService();
+        await storageService.init();
+        final authService = AuthService(storageService: storageService);
+        await authService.init();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: HomeScreen(
+                authService: authService,
+                storageService: storageService,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Search for Kafka
+        final searchField = find.byType(TextField).first;
+        await tester.enterText(searchField, 'Kafka');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+
+        // Result should show The Metamorphosis
+        expect(find.text('The Metamorphosis'), findsOneWidget);
+
+        // Dismiss search focus
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Tap category "ইসলামিক ও আত্মউন্নয়ন" (category_islamic_selfhelp) where Kafka has no books
+        final islamicChip = find.text('ইসলামিক ও আত্মউন্নয়ন');
+        expect(islamicChip, findsWidgets);
+        await tester.tap(islamicChip.first);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Should display "এই ক্যাটাগরিতে কোনো ফলাফল পাওয়া যায়নি"
+        expect(
+          find.text('এই ক্যাটাগরিতে কোনো ফলাফল পাওয়া যায়নি'),
+          findsOneWidget,
+        );
+        expect(find.text('সব ফলাফল দেখুন'), findsOneWidget);
+
+        // Tap "সব ফলাফল দেখুন"
+        await tester.tap(find.text('সব ফলাফল দেখুন'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // The Metamorphosis is restored!
+        expect(find.text('The Metamorphosis'), findsOneWidget);
+      },
+    );
   });
 
   group('App Smoke Test', () {

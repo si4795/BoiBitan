@@ -178,19 +178,231 @@ class FuzzySearch {
     return max(triSim, levSim * 0.7);
   }
 
+  /// Canonical author names and their phonetic / typo variations
+  static const Map<String, List<String>> canonicalAuthors = {
+    'J.K. Rowling': [
+      'jk rawling',
+      'jk rowling',
+      'j.k. rowling',
+      'j k rowling',
+      'rowling',
+    ],
+    'Franz Kafka': ['franz kafka', 'kafka', 'kafk', 'কাফকা', 'ফ্রাঞ্জ কাফকা'],
+    'Sarat Chandra Chattopadhyay': [
+      'sarat chandra',
+      'saratchandra',
+      'shorot chondro',
+      'sharat chandra',
+      'sarat chandra chattopadhyay',
+      'saratchandra chattopadhyay',
+      'শরৎচন্দ্র',
+      'শরৎচন্দ্র চট্টোপাধ্যায়',
+    ],
+    'Rabindranath Tagore': [
+      'rabindranath',
+      'tagore',
+      'robindro',
+      'rabindra',
+      'rabindranath tagore',
+      'রবীন্দ্রনাথ',
+      'রবীন্দ্রনাথ ঠাকুর',
+    ],
+    'Humayun Ahmed': ['humayun', 'humayun ahmed', 'হুমায়ূন', 'হুমায়ূন আহমেদ'],
+    'Muhammed Zafar Iqbal': [
+      'zafar iqbal',
+      'muhammed zafar iqbal',
+      'muhammad zafar iqbal',
+      'জাফর ইকবাল',
+      'মুহম্মদ জাফর ইকবাল',
+      'মুহাম্মদ জাফর ইকবাল',
+    ],
+    'Bankim Chandra Chattopadhyay': [
+      'bankim',
+      'bankim chandra',
+      'bankimchandra',
+      'bankim chandra chattopadhyay',
+      'বঙ্কিমচন্দ্র',
+      'বঙ্কিমচন্দ্র চট্টোপাধ্যায়',
+    ],
+    'Kazi Nazrul Islam': [
+      'kazi nazrul',
+      'nazrul islam',
+      'nazrul',
+      'নজরুল',
+      'কাজী নজরুল ইসলাম',
+    ],
+    'Bibhutibhushan Bandyopadhyay': [
+      'bibhutibhushan',
+      'bibhuti bhushan',
+      'bibhutibhushan bandyopadhyay',
+      'বিভূতিভূষণ',
+      'বিভূতিভূষণ বন্দ্যোপাধ্যায়',
+    ],
+    'Jane Austen': ['jane austen', 'austen'],
+    'George Orwell': ['george orwell', 'orwell'],
+    'Arthur Conan Doyle': ['conan doyle', 'arthur conan doyle'],
+    'H.G. Wells': ['h.g. wells', 'hg wells', 'wells'],
+  };
+
+  /// Resolves raw author query or candidate author to a canonical form if known.
+  static String? detectCanonicalAuthor(String query) {
+    final clean = normalize(query);
+    final phonetic = normalizePhonetic(query);
+    if (clean.isEmpty) return null;
+
+    // Pass 1: Exact match against canonical name
+    for (final canonical in canonicalAuthors.keys) {
+      if (clean == normalize(canonical) ||
+          phonetic == normalizePhonetic(canonical)) {
+        return canonical;
+      }
+    }
+
+    // Pass 2: Exact match against any alias
+    for (final entry in canonicalAuthors.entries) {
+      for (final alias in entry.value) {
+        if (clean == normalize(alias) || phonetic == normalizePhonetic(alias)) {
+          return entry.key;
+        }
+      }
+    }
+
+    // Pass 3: Longest alias contained in clean or phonetic
+    String? bestCanonical;
+    int bestMatchLength = 0;
+
+    for (final entry in canonicalAuthors.entries) {
+      for (final alias in entry.value) {
+        final normAlias = normalize(alias);
+        final phonAlias = normalizePhonetic(alias);
+        if (normAlias.length < 4) continue;
+
+        if (clean.contains(normAlias) || phonetic.contains(phonAlias)) {
+          if (normAlias.length > bestMatchLength) {
+            bestMatchLength = normAlias.length;
+            bestCanonical = entry.key;
+          }
+        }
+      }
+    }
+
+    if (bestCanonical != null) {
+      return bestCanonical;
+    }
+
+    // Pass 4: Alias contains the query (only for specific queries >= 4 chars)
+    if (clean.length >= 4) {
+      for (final entry in canonicalAuthors.entries) {
+        for (final alias in entry.value) {
+          final normAlias = normalize(alias);
+          if (normAlias.contains(clean)) {
+            if (clean.length > bestMatchLength) {
+              bestMatchLength = clean.length;
+              bestCanonical = entry.key;
+            }
+          }
+        }
+      }
+    }
+
+    return bestCanonical;
+  }
+
+  /// Checks if a candidate author satisfies strict author boundaries for a target author query.
+  /// If the query targets a specific author (e.g. "Sarat Chandra"), this method returns true
+  /// ONLY if the candidate author matches that target, and explicitly returns false if the candidate
+  /// belongs to a different known author (e.g. Bankim Chandra, Hemingway, Tagore).
+  static bool satisfiesAuthorBoundary({
+    required String query,
+    required String candidateAuthor,
+  }) {
+    final targetAuthor = detectCanonicalAuthor(query);
+    if (targetAuthor == null) {
+      // Query does not target a recognized canonical author constraint
+      return true;
+    }
+
+    final candidateCanonical = detectCanonicalAuthor(candidateAuthor);
+    if (candidateCanonical != null) {
+      // Both are recognized canonical authors: they must match!
+      return candidateCanonical == targetAuthor;
+    }
+
+    // Candidate is not in canonical map: check match score against target author
+    final score = max(
+      matchScore(targetAuthor, candidateAuthor),
+      matchScore(query, candidateAuthor),
+    );
+    return score >= 0.52;
+  }
+
+  /// Evaluates whether [book] is a junk document (e.g., <= 40 pages, thesis, dissertation,
+  /// research paper, study guide, fanfiction).
+  static bool isJunkDocument(Book book) {
+    // Minimum page limit: discard single-page documents and pamphlets
+    if (book.pageCount <= 40) {
+      return true;
+    }
+
+    final lowerTitle = book.title.toLowerCase();
+    final lowerDesc = book.description.toLowerCase();
+    final combined = '$lowerTitle $lowerDesc';
+
+    const junkKeywords = [
+      'thesis',
+      'dissertation',
+      'research paper',
+      'journal article',
+      'summary of',
+      'analysis of',
+      'study guide',
+      'fanfiction',
+      'unofficial fan',
+      'pamphlet',
+      'syllabus',
+      'question paper',
+      'exam paper',
+      'class notes',
+    ];
+
+    for (final kw in junkKeywords) {
+      if (combined.contains(kw)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   /// Ranks [books] against [query] by calculating weighted scores across
-  /// titles, authors, and categories.
+  /// titles, authors, and categories while enforcing author boundaries and junk filtering.
   static List<Book> rankBooks(
     List<Book> books,
     String query, {
     double threshold = 0.38,
+    bool filterJunk = false,
   }) {
     final clean = query.trim();
     if (clean.isEmpty) return List.from(books);
 
+    final targetAuthor = detectCanonicalAuthor(clean);
     final List<MapEntry<Book, double>> scored = [];
 
     for (final book in books) {
+      // 1. Strict author boundary enforcement
+      if (targetAuthor != null &&
+          !satisfiesAuthorBoundary(
+            query: clean,
+            candidateAuthor: book.author,
+          )) {
+        continue;
+      }
+
+      // 2. Junk filter if enabled
+      if (filterJunk && isJunkDocument(book)) {
+        continue;
+      }
+
       final scoreTitle = matchScore(clean, book.title) * 1.0;
       final scoreTitleBn = matchScore(clean, book.titleBn) * 1.0;
       final scoreAuthor = matchScore(clean, book.author) * 0.95;

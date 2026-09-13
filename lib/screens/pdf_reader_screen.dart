@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,6 +10,7 @@ import '../models/book.dart';
 import '../services/download_service.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
+import 'web_reader_screen.dart';
 
 class PdfReaderScreen extends StatefulWidget {
   final Book book;
@@ -107,6 +109,53 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
         });
       }
     } catch (e) {
+      // Intercept any 401, 403, or restricted access errors from Dio
+      final isRestrictedOrUnauthorized =
+          (e is DioException &&
+              (e.response?.statusCode == 401 ||
+                  e.response?.statusCode == 403 ||
+                  (e.type == DioExceptionType.badResponse &&
+                      (e.response?.statusCode == 401 ||
+                          e.response?.statusCode == 403)))) ||
+          e.toString().contains('401') ||
+          e.toString().contains('403') ||
+          e.toString().toLowerCase().contains('unauthorized') ||
+          e.toString().toLowerCase().contains('forbidden');
+
+      if (isRestrictedOrUnauthorized) {
+        String? fallbackUrl;
+        if (widget.book.previewUrl != null &&
+            widget.book.previewUrl!.trim().isNotEmpty) {
+          fallbackUrl = widget.book.previewUrl!.trim();
+        } else if (widget.book.downloadUrl.contains('archive.org/download/')) {
+          final match = RegExp(r'archive\.org\/download\/([^\/\?]+)')
+              .firstMatch(widget.book.downloadUrl);
+          if (match != null) {
+            fallbackUrl = 'https://archive.org/details/${match.group(1)}';
+          }
+        } else if (widget.book.id.startsWith('ia_')) {
+          fallbackUrl =
+              'https://archive.org/details/${widget.book.id.substring(3)}';
+        } else if (widget.book.downloadUrl.startsWith('http')) {
+          fallbackUrl = widget.book.downloadUrl.trim();
+        }
+
+        if (fallbackUrl != null && fallbackUrl.isNotEmpty && mounted) {
+          // Seamlessly fallback to Tier 2 by launching Archive.org embedded web reader
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => WebReaderScreen(
+                url: fallbackUrl!,
+                title: widget.book.getLocalizedTitle(context.isBengali),
+                book: widget.book,
+              ),
+            ),
+          );
+          return;
+        }
+      }
+
       if (mounted) {
         setState(() {
           _isLoading = false;

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_translations.dart';
@@ -30,84 +28,28 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  Timer? _emailDebounceTimer;
-  bool _isCheckingEmail = false;
-  bool _emailExists = false;
-  String? _emailHelperText;
-  Color? _emailHelperColor;
   bool _isLoading = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _emailController.addListener(_onEmailChanged);
+    _emailController.addListener(_clearError);
+    _passwordController.addListener(_clearError);
   }
 
-  void _onEmailChanged() {
-    final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      _emailDebounceTimer?.cancel();
-      if (_emailExists || _emailHelperText != null || _isCheckingEmail) {
-        setState(() {
-          _emailExists = false;
-          _isCheckingEmail = false;
-          _emailHelperText = null;
-          _emailHelperColor = null;
-        });
-      }
-      return;
+  void _clearError() {
+    if (_errorMessage != null) {
+      setState(() {
+        _errorMessage = null;
+      });
     }
-
-    if (!_emailRegex.hasMatch(email)) {
-      _emailDebounceTimer?.cancel();
-      setState(() {
-        _emailExists = false;
-        _isCheckingEmail = false;
-        _emailHelperText = context.tr('auth_invalid_email_short');
-        _emailHelperColor = Colors.red;
-      });
-      return;
-    }
-
-    // Valid email format: debounce existence check
-    _emailDebounceTimer?.cancel();
-    _emailDebounceTimer = Timer(const Duration(milliseconds: 350), () async {
-      if (!mounted) return;
-      final currentEmail = _emailController.text.trim();
-      if (!_emailRegex.hasMatch(currentEmail)) return;
-
-      setState(() {
-        _isCheckingEmail = true;
-      });
-
-      widget.authService.setStorageService(widget.storageService);
-      final exists = await widget.authService.checkEmailExists(currentEmail);
-
-      if (!mounted) return;
-      if (_emailController.text.trim().toLowerCase() !=
-          currentEmail.toLowerCase()) {
-        return;
-      }
-
-      setState(() {
-        _isCheckingEmail = false;
-        _emailExists = exists;
-        if (exists) {
-          _emailHelperText = null;
-          _emailHelperColor = null;
-        } else {
-          _emailHelperText = context.tr('auth_please_signup_first');
-          _emailHelperColor = Colors.orange;
-        }
-      });
-    });
   }
 
   @override
   void dispose() {
-    _emailDebounceTimer?.cancel();
-    _emailController.removeListener(_onEmailChanged);
+    _emailController.removeListener(_clearError);
+    _passwordController.removeListener(_clearError);
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -281,7 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _navigateToHome();
       } else {
         final errorMsg = context.tr(
-          response.errorMessageKey ?? 'auth_invalid_credentials_or_unverified',
+          response.errorMessageKey ?? 'auth_wrong_password',
         );
         setState(() {
           _errorMessage = errorMsg;
@@ -479,28 +421,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     hint: context.tr('email_hint'),
                     prefixIcon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
-                    suffixIcon: _isCheckingEmail
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : (_emailExists
-                              ? const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: Color(0xFF10B981),
-                                  size: 22,
-                                )
-                              : null),
-                    helperText: _emailHelperText,
-                    helperStyle: TextStyle(
-                      color: _emailHelperColor ?? Colors.red,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
                     validator: (val) {
                       final email = val?.trim() ?? '';
                       if (email.isEmpty) {

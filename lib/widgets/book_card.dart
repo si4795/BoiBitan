@@ -7,6 +7,7 @@ import '../models/book.dart';
 import '../screens/book_details_screen.dart';
 import '../screens/home_screen.dart';
 import '../services/storage_service.dart';
+import 'typography_cover.dart';
 
 enum BookCardType { shelf, grid, list }
 
@@ -58,69 +59,49 @@ class BookCard extends StatelessWidget {
     required double borderRadius,
     required BuildContext context,
   }) {
+    final hasCover = book.coverUrl.trim().isNotEmpty;
+    final isBn = context.isBengali;
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: Stack(
         children: [
-          CachedNetworkImage(
-            imageUrl: book.coverUrl,
-            width: width,
-            height: height,
-            fit: BoxFit.cover,
-            placeholder: (context, url) => Container(
+          if (hasCover)
+            CachedNetworkImage(
+              imageUrl: book.coverUrl,
               width: width,
               height: height,
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF22272E)
-                  : const Color(0xFFE5E0D8),
-              child: const Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                width: width,
+                height: height,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF22272E)
+                    : const Color(0xFFE5E0D8),
+                child: const Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                 ),
               ),
-            ),
-            errorWidget: (context, url, error) => Container(
+              errorWidget: (context, url, error) => TypographyCover(
+                title: book.getLocalizedTitle(isBn),
+                author: book.getLocalizedAuthor(isBn),
+                width: width,
+                height: height,
+                borderRadius: borderRadius,
+              ),
+            )
+          else
+            TypographyCover(
+              title: book.getLocalizedTitle(isBn),
+              author: book.getLocalizedAuthor(isBn),
               width: width,
               height: height,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Theme.of(context).colorScheme.primary
-                        .withValues(alpha: 0.8),
-                    Theme.of(context).colorScheme.secondary
-                        .withValues(alpha: 0.9),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.menu_book_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    book.getLocalizedTitle(context.isBengali),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+              borderRadius: borderRadius,
             ),
-          ),
           // Bookmark quick toggle button
           if ((storageService ?? context.storage) != null)
             PositionfulBookmark(

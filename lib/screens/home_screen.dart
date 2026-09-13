@@ -12,6 +12,7 @@ import '../services/book_api_service.dart';
 import '../services/storage_service.dart';
 import '../theme/theme_notifier.dart';
 import '../widgets/book_card.dart';
+import '../widgets/typography_cover.dart';
 import 'book_details_screen.dart';
 import 'category_books_screen.dart';
 import 'my_library_screen.dart';
@@ -166,6 +167,13 @@ class _HomeScreenState extends State<HomeScreen> {
         _suggestions = [];
       });
       return;
+    }
+
+    // Global search decouples from category lock
+    if (_selectedCategoryKey != 'category_all') {
+      setState(() {
+        _selectedCategoryKey = 'category_all';
+      });
     }
 
     // Dynamic suggestions when 2 or more characters
@@ -334,6 +342,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 borderRadius: BorderRadius.circular(20),
               ),
               onSelected: (selected) {
+                _removeSuggestionsOverlay();
+                _searchFocusNode.unfocus();
                 setState(() {
                   _selectedCategoryKey = catKey;
                 });
@@ -390,13 +400,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Book thumbnail
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: CachedNetworkImage(
-                    imageUrl: featuredBook.coverUrl,
-                    width: 80,
-                    height: 115,
-                    fit: BoxFit.cover,
-                    placeholder: (_, _) => Container(color: Colors.black26),
-                  ),
+                  child: featuredBook.coverUrl.trim().isEmpty
+                      ? TypographyCover(
+                          title: featuredBook.getLocalizedTitle(isBn),
+                          author: featuredBook.getLocalizedAuthor(isBn),
+                          width: 80,
+                          height: 115,
+                          borderRadius: 12,
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: featuredBook.coverUrl,
+                          width: 80,
+                          height: 115,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) =>
+                              Container(color: Colors.black26),
+                          errorWidget: (_, _, _) => TypographyCover(
+                            title: featuredBook.getLocalizedTitle(isBn),
+                            author: featuredBook.getLocalizedAuthor(isBn),
+                            width: 80,
+                            height: 115,
+                            borderRadius: 12,
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 16),
                 // Text details
@@ -559,6 +585,27 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String _getCategoryEnglishName(String catKey) {
+    switch (catKey) {
+      case 'category_bangla_novel':
+        return 'Bengali Novels';
+      case 'category_translated':
+        return 'Translated Literature';
+      case 'category_islamic_selfhelp':
+        return 'Islamic & Self-Help';
+      case 'category_scifi':
+        return 'Science & Sci-Fi';
+      case 'category_english_classics':
+        return 'English Classics';
+      case 'category_poetry_drama':
+        return 'Poetry & Drama';
+      case 'category_self_help':
+        return 'Self-Help & Career';
+      default:
+        return '';
+    }
+  }
+
   // Home Feed Body
   Widget _buildHomeFeed(BuildContext context) {
     final theme = Theme.of(context);
@@ -573,6 +620,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (isSearching || isCategoryFiltered) {
       List<Book> searchResults;
       if (isSearching) {
+        // Global search: author/title searches list all matching books
         final localMatches = BookCatalog.search(_searchQuery);
         final seenIds = localMatches.map((b) => b.id).toSet();
         final seenTitles = localMatches
@@ -585,41 +633,56 @@ class _HomeScreenState extends State<HomeScreen> {
         }).toList();
 
         searchResults = [...localMatches, ...uniqueApiBooks];
-      } else {
-        searchResults = BookCatalog.books;
-      }
 
-      if (isCategoryFiltered) {
-        String matchCat;
-        switch (_selectedCategoryKey) {
-          case 'category_bangla_novel':
-            matchCat = 'Bengali Novels';
-            break;
-          case 'category_translated':
-            matchCat = 'Translated Literature';
-            break;
-          case 'category_islamic_selfhelp':
-            matchCat = 'Islamic & Self-Help';
-            break;
-          case 'category_scifi':
-            matchCat = 'Science & Sci-Fi';
-            break;
-          case 'category_english_classics':
-            matchCat = 'English Classics';
-            break;
-          case 'category_poetry_drama':
-            matchCat = 'Poetry & Drama';
-            break;
-          case 'category_self_help':
-            matchCat = 'Self-Help & Career';
-            break;
-          default:
-            matchCat = '';
+        // Dynamic category chip reactivity: filter current search results by that genre
+        if (isCategoryFiltered) {
+          final matchCat = _getCategoryEnglishName(_selectedCategoryKey);
+          if (matchCat.isNotEmpty) {
+            searchResults = searchResults.where((b) {
+              final cat = b.category.toLowerCase();
+              final catBn = b.categoryBn.toLowerCase();
+              final mCat = matchCat.toLowerCase();
+              if (cat == mCat || cat.contains(mCat) || catBn.contains(mCat)) {
+                return true;
+              }
+              if (matchCat == 'Science & Sci-Fi' &&
+                  (cat.contains('sci-fi') ||
+                      cat.contains('science') ||
+                      b.description.toLowerCase().contains('science fiction') ||
+                      b.descriptionBn.contains('বিজ্ঞান'))) {
+                return true;
+              }
+              if (matchCat == 'Bengali Novels' &&
+                  (cat.contains('bengali') ||
+                      catBn.contains('বাংলা') ||
+                      cat.contains('novel'))) {
+                return true;
+              }
+              if (matchCat == 'Translated Literature' &&
+                  (cat.contains('translated') || catBn.contains('অনূদিত'))) {
+                return true;
+              }
+              if (matchCat == 'Islamic & Self-Help' &&
+                  (cat.contains('islamic') ||
+                      cat.contains('self-help') ||
+                      catBn.contains('ইসলামিক') ||
+                      catBn.contains('আত্মউন্নয়ন'))) {
+                return true;
+              }
+              return false;
+            }).toList();
+          }
         }
-        if (matchCat.isNotEmpty) {
-          searchResults = searchResults
-              .where((b) => b.category == matchCat)
-              .toList();
+      } else {
+        // Category filtering only applies when browsing categories without a search query
+        searchResults = BookCatalog.books;
+        if (isCategoryFiltered) {
+          final matchCat = _getCategoryEnglishName(_selectedCategoryKey);
+          if (matchCat.isNotEmpty) {
+            searchResults = searchResults
+                .where((b) => b.category == matchCat)
+                .toList();
+          }
         }
       }
 
@@ -661,6 +724,12 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
 
+      final headerTitle = isSearching
+          ? (isCategoryFiltered
+                ? '${context.tr(_selectedCategoryKey)} (${context.formatNum(searchResults.length)})'
+                : '${context.tr('search_results_global')} (${context.formatNum(searchResults.length)})')
+          : '${context.tr(_selectedCategoryKey)} (${context.formatNum(searchResults.length)})';
+
       slivers.add(
         SliverToBoxAdapter(
           child: Padding(
@@ -669,7 +738,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '${context.tr('search_results_global')} (${context.formatNum(searchResults.length)})',
+                  headerTitle,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -710,22 +779,38 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(
-                      Icons.search_off_rounded,
+                    Icon(
+                      isSearching && isCategoryFiltered
+                          ? Icons.filter_list_off_rounded
+                          : Icons.search_off_rounded,
                       size: 54,
                       color: Colors.grey,
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      context.tr('no_books_found'),
+                      isSearching && isCategoryFiltered
+                          ? context.tr('no_category_results')
+                          : context.tr('no_books_found'),
                       style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      context.tr('try_another_search'),
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall,
                     ),
+                    const SizedBox(height: 10),
+                    if (isSearching && isCategoryFiltered)
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: Text(context.tr('reset_category_filter')),
+                        onPressed: () {
+                          setState(() {
+                            _selectedCategoryKey = 'category_all';
+                          });
+                        },
+                      )
+                    else
+                      Text(
+                        context.tr('try_another_search'),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall,
+                      ),
                   ],
                 ),
               ),

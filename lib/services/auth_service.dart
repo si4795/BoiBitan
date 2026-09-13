@@ -189,7 +189,7 @@ class AuthService extends ChangeNotifier {
         await FirebaseAuth.instance.signOut();
         return true;
       } on FirebaseAuthException catch (e) {
-        if (e.code == 'wrong-password') {
+        if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
           return true;
         }
         if (e.code == 'user-not-found') {
@@ -565,23 +565,13 @@ class AuthService extends ChangeNotifier {
       );
     }
 
-    // 1. Firebase Authentication:
-    // In the Login method (after signInWithEmailAndPassword), check if user.emailVerified is true.
-    // If false, sign them out and return unverified error.
+    // 1. Direct Firebase Authentication delegation:
     if (_isFirebaseAvailable) {
       try {
         final userCredential = await FirebaseAuth.instance
             .signInWithEmailAndPassword(email: cleanEmail, password: password);
         final user = userCredential.user;
         if (user != null) {
-          if (!user.emailVerified) {
-            await FirebaseAuth.instance.signOut();
-            return AuthResponse.failure(
-              AuthResultStatus.unverified,
-              'auth_verify_email_first',
-            );
-          }
-
           _userName = (user.displayName != null && user.displayName!.isNotEmpty)
               ? user.displayName
               : cleanEmail.split('@').first;
@@ -593,6 +583,14 @@ class AuthService extends ChangeNotifier {
           await storageService?.switchUser(currentUserId);
 
           if (storageService != null) {
+            if (!storageService!.isEmailRegistered(cleanEmail)) {
+              await storageService!.registerUser(
+                name: _userName!,
+                email: cleanEmail,
+                password: password,
+                photoUrl: _userPhotoUrl,
+              );
+            }
             await storageService!.markEmailVerified(cleanEmail);
           }
 
@@ -611,26 +609,33 @@ class AuthService extends ChangeNotifier {
         }
       } on FirebaseAuthException catch (e) {
         debugPrint('Firebase Auth SignIn notice: [${e.code}] ${e.message}');
-        if (e.code == 'user-not-found') {
-          if (storageService == null ||
-              !storageService!.isEmailRegistered(cleanEmail)) {
-            return AuthResponse.failure(
-              AuthResultStatus.userNotFound,
-              'auth_user_not_found',
-            );
-          }
-        } else if (e.code == 'wrong-password' ||
-            e.code == 'invalid-credential') {
-          if (storageService == null ||
-              !storageService!.isEmailRegistered(cleanEmail)) {
-            return AuthResponse.failure(
-              AuthResultStatus.wrongPassword,
-              'auth_wrong_password',
-            );
-          }
+        if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+          return AuthResponse.failure(
+            AuthResultStatus.wrongPassword,
+            'auth_wrong_password',
+          );
+        } else if (e.code == 'user-not-found') {
+          return AuthResponse.failure(
+            AuthResultStatus.userNotFound,
+            'auth_user_not_found',
+          );
+        } else if (e.code == 'invalid-email') {
+          return AuthResponse.failure(
+            AuthResultStatus.invalidInput,
+            'auth_invalid_email_hint',
+          );
+        } else {
+          return AuthResponse.failure(
+            AuthResultStatus.wrongPassword,
+            'auth_wrong_password',
+          );
         }
       } catch (e) {
         debugPrint('Firebase Auth SignIn general notice: $e');
+        return AuthResponse.failure(
+          AuthResultStatus.invalidInput,
+          'auth_wrong_password',
+        );
       }
     }
 

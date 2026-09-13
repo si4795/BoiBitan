@@ -2,15 +2,18 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 
-import 'package:url_launcher/url_launcher.dart';
-
 import '../l10n/app_translations.dart';
 import '../models/book.dart';
 import '../services/download_service.dart';
 import '../services/storage_service.dart';
+import '../utils/fuzzy_search.dart';
 import '../widgets/captcha_dialog.dart';
+import '../widgets/typography_cover.dart';
 import 'home_screen.dart';
 import 'pdf_reader_screen.dart';
+import 'web_reader_screen.dart';
+
+enum ReadingTier { tier1DirectPdf, tier2WebStream, tier3MetadataOnly }
 
 class BookDetailsScreen extends StatefulWidget {
   final Book book;
@@ -54,6 +57,20 @@ class _BookDetailsScreenState extends State<BookDetailsScreen> {
   }
 
   void _triggerCaptchaDownload() {
+    final dl = widget.book.downloadUrl.trim();
+    final hasAsset =
+        widget.book.assetPdfPath != null &&
+        widget.book.assetPdfPath!.trim().isNotEmpty;
+
+    if (!hasAsset &&
+        (dl.isEmpty ||
+            (!dl.startsWith('http://') && !dl.startsWith('https://')))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.tr('digital_copy_load_failed'))),
+      );
+      return;
+    }
+
     CaptchaDialog.show(
       context,
       book: widget.book,
@@ -62,34 +79,128 @@ class _BookDetailsScreenState extends State<BookDetailsScreen> {
     );
   }
 
-  void _openReader() {
-    final downloadedPath = _activeStorage.getDownloadedFilePath(widget.book.id);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PdfReaderScreen(
-          book: widget.book,
-          localPdfPath: downloadedPath,
-          storageService: _activeStorage,
-        ),
-      ),
+  /// Validates that a link does not point to a conflicting, entirely different author.
+  bool _isMismatchedBinding(String url) {
+    final lowerUrl = url.toLowerCase();
+    final bookAuthor = widget.book.author.toLowerCase();
+    final canonicalBookAuthor = FuzzySearch.detectCanonicalAuthor(
+      widget.book.author,
     );
-  }
 
-  Future<void> _openGooglePreview() async {
-    final urlString = widget.book.previewUrl ?? widget.book.downloadUrl;
-    final uri = Uri.tryParse(urlString);
-    if (uri != null) {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Cannot open preview URL: $urlString')),
-          );
+    for (final entry in FuzzySearch.canonicalAuthors.entries) {
+      final otherAuthor = entry.key;
+      if (canonicalBookAuthor != null && otherAuthor == canonicalBookAuthor) {
+        continue;
+      }
+      if (bookAuthor.contains(otherAuthor.toLowerCase())) {
+        continue;
+      }
+      for (final alias in entry.value) {
+        final normAlias = alias.replaceAll(' ', '').toLowerCase();
+        if (normAlias.length >= 6 && lowerUrl.contains(normAlias)) {
+          return true;
         }
       }
     }
+    return false;
+  }
+
+  bool get _hasDirectPdfDocument {
+    // 1. Check if downloaded file exists in local storage
+    final downloadedPath = _activeStorage.getDownloadedFilePath(widget.book.id);
+    if (downloadedPath != null && downloadedPath.trim().isNotEmpty) {
+      return true;
+    }
+
+    // 2. Check bundled asset PDF
+    if (widget.book.assetPdfPath != null &&
+        widget.book.assetPdfPath!.trim().isNotEmpty) {
+      return true;
+    }
+
+    // 3. Check direct PDF URL (e.g. *.pdf, /download/...)
+    final dl = widget.book.downloadUrl.trim().toLowerCase();
+    if (dl.endsWith('.pdf') ||
+        dl.contains('.pdf') ||
+        dl.contains('/download/')) {
+      if (_isMismatchedBinding(dl)) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  String? get _webReaderUrl {
+    final preview = widget.book.previewUrl?.trim();
+    if (preview != null &&
+        (preview.startsWith('http://') || preview.startsWith('https://'))) {
+      if (!_isMismatchedBinding(preview)) {
+        return preview;
+      }
+    }
+
+    final dl = widget.book.downloadUrl.trim();
+    if (dl.startsWith('http://') || dl.startsWith('https://')) {
+      if (!_isMismatchedBinding(dl)) {
+        return dl;
+      }
+    }
+
+    return null;
+  }
+
+  ReadingTier get _readingTier {
+    if (_hasDirectPdfDocument) {
+      return ReadingTier.tier1DirectPdf;
+    }
+    final webUrl = _webReaderUrl;
+    if (webUrl != null && webUrl.isNotEmpty) {
+      return ReadingTier.tier2WebStream;
+    }
+    return ReadingTier.tier3MetadataOnly;
+  }
+
+  void _openUnifiedReader() {
+    // Case A (Direct Document): If the link points directly to a .pdf file, open in native PDF viewer
+    if (_hasDirectPdfDocument) {
+      final downloadedPath = _activeStorage.getDownloadedFilePath(
+        widget.book.id,
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PdfReaderScreen(
+            book: widget.book,
+            localPdfPath: downloadedPath,
+            storageService: _activeStorage,
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Case B (Web Reading Portal/Archive Stream): Launch inside in-app WebReaderScreen
+    final webUrl = _webReaderUrl;
+    if (webUrl != null && webUrl.isNotEmpty) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WebReaderScreen(
+            url: webUrl,
+            title: widget.book.getLocalizedTitle(context.isBengali),
+            book: widget.book,
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Error Handling: Invalid or empty URLs
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr('digital_copy_load_failed'))),
+    );
   }
 
   Widget _buildMetaPill({
@@ -208,27 +319,36 @@ class _BookDetailsScreenState extends State<BookDetailsScreen> {
                       ),
                     ],
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: CachedNetworkImage(
-                      imageUrl: book.coverUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, _) => Container(
-                        color: Colors.black12,
-                        child: const Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                  child: book.coverUrl.trim().isEmpty
+                      ? TypographyCover(
+                          title: book.getLocalizedTitle(isBn),
+                          author: book.getLocalizedAuthor(isBn),
+                          width: 165,
+                          height: 240,
+                          borderRadius: 16,
+                        )
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(
+                            imageUrl: book.coverUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              color: Colors.black12,
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            ),
+                            errorWidget: (_, _, _) => TypographyCover(
+                              title: book.getLocalizedTitle(isBn),
+                              author: book.getLocalizedAuthor(isBn),
+                              width: 165,
+                              height: 240,
+                              borderRadius: 16,
+                            ),
+                          ),
                         ),
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        color: theme.colorScheme.primary,
-                        child: const Icon(
-                          Icons.menu_book_rounded,
-                          size: 48,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -362,36 +482,59 @@ class _BookDetailsScreenState extends State<BookDetailsScreen> {
         child: SafeArea(
           child: Builder(
             builder: (context) {
-              final isDirectPdf = widget.book.downloadUrl
-                  .toLowerCase()
-                  .contains('.pdf');
-              final hasPreview =
-                  widget.book.previewUrl != null &&
-                  widget.book.previewUrl!.isNotEmpty;
+              final tier = _readingTier;
 
-              if (!isDirectPdf && hasPreview) {
-                return SizedBox(
+              // Tier 3: Metadata Only - No digital reading copy or valid stream exists anywhere online
+              if (tier == ReadingTier.tier3MetadataOnly) {
+                final isDark = theme.brightness == Brightness.dark;
+                return Container(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.open_in_browser_rounded),
-                    label: Text(context.tr('read_google_preview')),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF1E242C)
+                        : const Color(0xFFF4ECE1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.25),
                     ),
-                    onPressed: _openGooglePreview,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        color: theme.colorScheme.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          context.tr('tier3_no_copy_info'),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: theme.textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }
 
+              // Tier 1 (Direct PDF) & Tier 2 (Web Reading Portal / Archive Stream)
               return Row(
                 children: [
-                  // Read Now button
+                  // Read Book button ("বইটি পড়ুন")
                   Expanded(
                     flex: 5,
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.menu_book_rounded),
-                      label: Text(context.tr('read_now')),
-                      onPressed: _openReader,
+                      label: Text(context.tr('read_book')),
+                      onPressed: _openUnifiedReader,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -405,15 +548,6 @@ class _BookDetailsScreenState extends State<BookDetailsScreen> {
                       onPressed: _triggerCaptchaDownload,
                     ),
                   ),
-
-                  if (hasPreview) ...[
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: context.tr('read_google_preview'),
-                      icon: const Icon(Icons.preview_rounded),
-                      onPressed: _openGooglePreview,
-                    ),
-                  ],
                 ],
               );
             },
