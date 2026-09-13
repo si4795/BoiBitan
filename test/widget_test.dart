@@ -15,11 +15,13 @@ import 'package:boi_bitan/models/user_book_progress.dart';
 import 'package:boi_bitan/repositories/firestore_library_repository.dart';
 import 'package:boi_bitan/screens/auth/login_screen.dart';
 import 'package:boi_bitan/screens/auth/signup_screen.dart';
+import 'package:boi_bitan/screens/home_screen.dart';
 import 'package:boi_bitan/screens/my_library_screen.dart';
 import 'package:boi_bitan/services/auth_service.dart';
 import 'package:boi_bitan/services/book_api_service.dart';
 import 'package:boi_bitan/services/storage_service.dart';
 import 'package:boi_bitan/theme/theme_notifier.dart';
+import 'package:boi_bitan/utils/fuzzy_search.dart';
 
 void main() {
   setUp(() {
@@ -1000,6 +1002,218 @@ void main() {
         expect(find.text('Gitanjali'), findsNothing);
       },
     );
+  });
+
+  group('Fuzzy Search & Bilingual Matching Tests', () {
+    test('Levenshtein distance computes correctly across edge cases', () {
+      expect(FuzzySearch.levenshteinDistance('', ''), equals(0));
+      expect(FuzzySearch.levenshteinDistance('', 'kafka'), equals(5));
+      expect(FuzzySearch.levenshteinDistance('kafka', 'kafka'), equals(0));
+      expect(FuzzySearch.levenshteinDistance('kitten', 'sitting'), equals(3));
+      expect(
+        FuzzySearch.levenshteinDistance('gitanjoli', 'gitanjali'),
+        equals(1),
+      );
+      expect(
+        FuzzySearch.levenshteinDistance('robindro', 'rabindra'),
+        equals(2),
+      );
+    });
+
+    test('Trigram similarity identifies close typos and phonetic variants', () {
+      final simExact = FuzzySearch.trigramSimilarity('gitanjali', 'gitanjali');
+      expect(simExact, equals(1.0));
+
+      final simTypo = FuzzySearch.trigramSimilarity('gitanjoli', 'gitanjali');
+      expect(simTypo, greaterThan(0.60));
+
+      final simDiff = FuzzySearch.trigramSimilarity('kafka', 'shakespeare');
+      expect(simDiff, lessThan(0.20));
+    });
+
+    test(
+      'Phonetic normalization collapses vowel and transliteration ambiguity',
+      () {
+        final norm1 = FuzzySearch.normalizePhonetic('Robindro');
+        final norm2 = FuzzySearch.normalizePhonetic('Rabindra');
+        expect(norm1, equals(norm2));
+
+        final g1 = FuzzySearch.normalizePhonetic('Geetanjali');
+        final g2 = FuzzySearch.normalizePhonetic('Gitanjali');
+        expect(g1, equals(g2));
+      },
+    );
+
+    test('BookCatalog.search matches typos and single-token queries', () {
+      // 1. "gitanjoli" matches Gitanjali (Rabindranath Tagore)
+      final gitanjaliResults = BookCatalog.search('gitanjoli');
+      expect(gitanjaliResults.isNotEmpty, isTrue);
+      expect(gitanjaliResults.first.id, equals('gitanjali'));
+
+      // 2. "robindro" matches Rabindranath Tagore books
+      final robindroResults = BookCatalog.search('robindro');
+      expect(robindroResults.isNotEmpty, isTrue);
+      final authors = robindroResults.map((b) => b.author).toList();
+      expect(authors.any((a) => a.contains('Tagore')), isTrue);
+
+      // 3. "kafka" matches Franz Kafka's Metamorphosis
+      final kafkaResults = BookCatalog.search('kafka');
+      expect(kafkaResults.isNotEmpty, isTrue);
+      expect(kafkaResults.first.id, equals('metamorphosis'));
+
+      // 4. Bengali query "দেবদাস" matches Devdas
+      final devdasResults = BookCatalog.search('দেবদাস');
+      expect(devdasResults.isNotEmpty, isTrue);
+      expect(devdasResults.first.id, equals('devdas'));
+
+      // 5. English classic query "austen" matches Pride and Prejudice
+      final austenResults = BookCatalog.search('austen');
+      expect(austenResults.isNotEmpty, isTrue);
+      expect(austenResults.first.id, equals('pride_and_prejudice'));
+    });
+  });
+
+  group('Language Integrity & Catalog Engine Tests', () {
+    test(
+      'detectTargetLanguage accurately classifies Bengali vs English queries',
+      () {
+        expect(
+          BookApiService.detectTargetLanguage('রবীন্দ্রনাথ'),
+          equals('bn'),
+        );
+        expect(BookApiService.detectTargetLanguage('devdas'), equals('bn'));
+        expect(BookApiService.detectTargetLanguage('robindro'), equals('bn'));
+        expect(
+          BookApiService.detectTargetLanguage('humayun ahmed'),
+          equals('bn'),
+        );
+        expect(
+          BookApiService.detectTargetLanguage('pride and prejudice'),
+          isNull,
+        );
+      },
+    );
+
+    test('satisfiesLanguageIntegrity prevents cross-language mismatches', () {
+      // 1. When searching for Bengali, Hindi/Sanskrit docs must be rejected
+      final rejectHindi = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: 'hin',
+        candidateTitle: 'Devdas',
+        targetLanguage: 'bn',
+      );
+      expect(
+        rejectHindi,
+        isFalse,
+        reason: 'Hindi language docs must be rejected for Bengali targets',
+      );
+
+      final rejectSanskrit = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: 'san',
+        candidateTitle: 'Gitanjali',
+        targetLanguage: 'bn',
+      );
+      expect(rejectSanskrit, isFalse);
+
+      // 2. Accept genuine Bengali docs
+      final acceptBengali = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: 'ben',
+        candidateTitle: 'Devdas',
+        targetLanguage: 'bn',
+      );
+      expect(acceptBengali, isTrue);
+
+      final acceptBengaliUnicode = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: null,
+        candidateTitle: 'দেবদাস',
+        targetLanguage: 'bn',
+      );
+      expect(acceptBengaliUnicode, isTrue);
+
+      // 3. For English targets, ensure English docs are accepted and Bengali characters are excluded
+      final acceptEnglish = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: 'eng',
+        candidateTitle: 'The Metamorphosis',
+        targetLanguage: 'en',
+      );
+      expect(acceptEnglish, isTrue);
+
+      final rejectBengaliInEnglish = BookApiService.satisfiesLanguageIntegrity(
+        rawLanguage: 'ben',
+        candidateTitle: 'রূপান্তর',
+        targetLanguage: 'en',
+      );
+      expect(rejectBengaliInEnglish, isFalse);
+    });
+  });
+
+  group('UI Language Toggle Relocation Widget Tests', () {
+    testWidgets('HomeScreen AppBar does not contain ConsumerLocaleButton', (
+      WidgetTester tester,
+    ) async {
+      final storageService = StorageService();
+      await storageService.init();
+      final authService = AuthService(storageService: storageService);
+      await authService.init();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: HomeScreen(
+              authService: authService,
+              storageService: storageService,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Verify HomeScreen AppBar does not contain ConsumerLocaleButton
+      final homeAppBar = find.byType(AppBar);
+      expect(homeAppBar, findsOneWidget);
+      expect(
+        find.descendant(
+          of: homeAppBar,
+          matching: find.byType(ConsumerLocaleButton),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('LoginScreen and SignUpScreen render ConsumerLocaleButton', (
+      WidgetTester tester,
+    ) async {
+      final storageService = StorageService();
+      await storageService.init();
+      final authService = AuthService(storageService: storageService);
+      await authService.init();
+
+      // 1. Test LoginScreen
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LoginScreen(
+            authService: authService,
+            storageService: storageService,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ConsumerLocaleButton), findsOneWidget);
+
+      // 2. Test SignUpScreen
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SignupScreen(
+            authService: authService,
+            storageService: storageService,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ConsumerLocaleButton), findsOneWidget);
+    });
   });
 
   group('App Smoke Test', () {

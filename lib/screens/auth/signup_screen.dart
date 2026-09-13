@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_translations.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
+import '../../widgets/consumer_locale_button.dart';
 import '../../widgets/custom_text_field.dart';
 
 import 'otp_verification_screen.dart';
@@ -181,6 +182,7 @@ class _SignupScreenState extends State<SignupScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(context.tr('signup_title')),
+        actions: const [ConsumerLocaleButton(), SizedBox(width: 8)],
       ),
       body: SafeArea(
         child: Center(

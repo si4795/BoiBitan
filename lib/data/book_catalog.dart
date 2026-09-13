@@ -1,4 +1,5 @@
 import '../models/book.dart';
+import '../utils/fuzzy_search.dart';
 
 class BookCatalog {
   static const List<String> categories = [
@@ -11,7 +12,7 @@ class BookCatalog {
   ];
 
   static final List<Book> books = [
-    // 1. Shesher Kobita - Rabindranath Tagore
+    // --- Bengali Literature ---
     const Book(
       id: 'shesher_kobita',
       title: 'Shesher Kobita',
@@ -34,7 +35,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 2. Devdas - Sarat Chandra Chattopadhyay
     const Book(
       id: 'devdas',
       title: 'Devdas',
@@ -57,7 +57,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 3. Misir Ali: Ami Ebong Amra - Humayun Ahmed
     const Book(
       id: 'misir_ali_ami_ebong_amra',
       title: 'Misir Ali: Ami Ebong Amra',
@@ -80,7 +79,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 4. Srikanta - Sarat Chandra Chattopadhyay
     const Book(
       id: 'srikanta',
       title: 'Srikanta',
@@ -103,7 +101,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 5. Shankhonil Karagar - Humayun Ahmed
     const Book(
       id: 'shankhonil_karagar',
       title: 'Shankhonil Karagar',
@@ -126,7 +123,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 6. Anandamath - Bankim Chandra Chattopadhyay
     const Book(
       id: 'anandamath',
       title: 'Anandamath',
@@ -149,7 +145,7 @@ class BookCatalog {
       isTrending: false,
     ),
 
-    // 7. The Alchemist - Paulo Coelho (অনূদিত)
+    // --- Translated Literature ---
     const Book(
       id: 'the_alchemist',
       title: 'The Alchemist',
@@ -172,7 +168,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 8. The Old Man and the Sea - Ernest Hemingway (অনূদিত)
     const Book(
       id: 'old_man_sea',
       title: 'The Old Man and the Sea',
@@ -195,7 +190,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 9. Sherlock Holmes: Selected Cases - Arthur Conan Doyle (অনূদিত)
     const Book(
       id: 'sherlock_holmes',
       title: 'The Adventures of Sherlock Holmes',
@@ -218,7 +212,30 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 10. Pride and Prejudice - Jane Austen
+    const Book(
+      id: 'metamorphosis',
+      title: 'The Metamorphosis',
+      titleBn: 'রূপান্তর (মেটামরফোসিস)',
+      author: 'Franz Kafka',
+      authorBn: 'ফ্রাঞ্জ কাফকা',
+      category: 'Translated Literature',
+      categoryBn: 'অনূদিত সাহিত্য',
+      description: 'The surreal masterpiece chronicling the harrowing transformation of traveling salesman Gregor Samsa into an enormous insect.',
+      descriptionBn: 'গ্রেগর সামসার এক সকালে বিশালাকার পোকায় রূপান্তরের পরাবাস্তব মনস্তাত্ত্বিক আখ্যান। ফ্রাঞ্জ কাফকার অমর কালজয়ী উপন্যাস।',
+      coverUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=600&q=80',
+      rating: 4.9,
+      reviewCount: 3890,
+      pageCount: 110,
+      fileSize: '4.8 MB',
+      publicationYear: 1915,
+      downloadUrl: 'https://ia800302.us.archive.org/21/items/metamorphosis_00_kafka/metamorphosis_00_kafka.pdf',
+      previewUrl: 'https://archive.org/details/metamorphosis_00_kafka',
+      assetPdfPath: 'assets/sample_book.pdf',
+      isFeatured: true,
+      isTrending: true,
+    ),
+
+    // --- English Classics ---
     const Book(
       id: 'pride_and_prejudice',
       title: 'Pride and Prejudice',
@@ -241,7 +258,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 11. Alice in Wonderland - Lewis Carroll
     const Book(
       id: 'alice_in_wonderland',
       title: "Alice's Adventures in Wonderland",
@@ -264,7 +280,7 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 12. Gitanjali (Song Offerings) - Rabindranath Tagore
+    // --- Poetry & Drama ---
     const Book(
       id: 'gitanjali',
       title: 'Gitanjali',
@@ -287,7 +303,7 @@ class BookCatalog {
       isTrending: false,
     ),
 
-    // 13. Deepu Number Two - Muhammed Zafar Iqbal
+    // --- Youth & Adolescent Fiction ---
     const Book(
       id: 'deepu_number_two',
       title: 'Deepu Number Two',
@@ -310,7 +326,7 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 14. Atomic Habits (অনূদিত) - James Clear
+    // --- Self-Help & Personal Growth ---
     const Book(
       id: 'atomic_habits',
       title: 'Atomic Habits',
@@ -333,7 +349,7 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 12. Paradoxical Sajid - Arif Azad
+    // --- Islamic & Philosophical ---
     const Book(
       id: 'paradoxical_sajid',
       title: 'Paradoxical Sajid',
@@ -357,7 +373,7 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 13. Ahok - Humayun Ahmed
+    // --- Science & Sci-Fi ---
     const Book(
       id: 'ahok_humayun_ahmed',
       title: 'Ahok',
@@ -382,7 +398,6 @@ class BookCatalog {
       isTrending: true,
     ),
 
-    // 14. The War of the Worlds - H. G. Wells
     const Book(
       id: 'war_of_the_worlds',
       title: 'The War of the Worlds',
@@ -428,16 +443,9 @@ class BookCatalog {
   static List<Book> getSciFi() =>
       books.where((b) => b.category == 'Science & Sci-Fi').toList();
 
-  static List<Book> search(String query) {
-    final clean = query.trim().toLowerCase();
-    if (clean.isEmpty) return books;
-    return books.where((b) {
-      return b.title.toLowerCase().contains(clean) ||
-          b.titleBn.toLowerCase().contains(clean) ||
-          b.author.toLowerCase().contains(clean) ||
-          b.authorBn.toLowerCase().contains(clean) ||
-          b.category.toLowerCase().contains(clean) ||
-          b.categoryBn.toLowerCase().contains(clean);
-    }).toList();
+  /// Searches catalog items using fuzzy bilingual ranking across titles, authors,
+  /// and categories.
+  static List<Book> search(String query, {double threshold = 0.38}) {
+    return FuzzySearch.rankBooks(books, query, threshold: threshold);
   }
 }

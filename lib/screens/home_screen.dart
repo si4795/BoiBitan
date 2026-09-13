@@ -17,6 +17,8 @@ import 'category_books_screen.dart';
 import 'my_library_screen.dart';
 import 'settings_screen.dart';
 
+export '../widgets/consumer_locale_button.dart';
+
 class HomeScreen extends StatefulWidget {
   final AuthService authService;
   final StorageService storageService;
@@ -143,8 +145,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _applySuggestion(String text) {
     _searchController.text = text;
-    _searchController.selection =
-        TextSelection.fromPosition(TextPosition(offset: text.length));
+    _searchController.selection = TextSelection.fromPosition(
+      TextPosition(offset: text.length),
+    );
     _removeSuggestionsOverlay();
     _searchFocusNode.unfocus();
     _performSearch(text);
@@ -255,8 +258,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   child: Text(
                     context.tr('view_all'),
                     style: TextStyle(
@@ -481,8 +486,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildShimmerGrid(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBg = isDark ? const Color(0xFF1E242C) : const Color(0xFFF0EBE3);
-    final elementBg =
-        isDark ? const Color(0xFF282E38) : const Color(0xFFDED8CE);
+    final elementBg = isDark
+        ? const Color(0xFF282E38)
+        : const Color(0xFFDED8CE);
 
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -569,8 +575,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (isSearching) {
         final localMatches = BookCatalog.search(_searchQuery);
         final seenIds = localMatches.map((b) => b.id).toSet();
-        final seenTitles =
-            localMatches.map((b) => b.title.toLowerCase().trim()).toSet();
+        final seenTitles = localMatches
+            .map((b) => b.title.toLowerCase().trim())
+            .toSet();
 
         final uniqueApiBooks = _apiSearchResults.where((b) {
           final lower = b.title.toLowerCase().trim();
@@ -610,8 +617,9 @@ class _HomeScreenState extends State<HomeScreen> {
             matchCat = '';
         }
         if (matchCat.isNotEmpty) {
-          searchResults =
-              searchResults.where((b) => b.category == matchCat).toList();
+          searchResults = searchResults
+              .where((b) => b.category == matchCat)
+              .toList();
         }
       }
 
@@ -620,8 +628,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SliverToBoxAdapter(
             child: Container(
               margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: theme.colorScheme.primary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
@@ -730,8 +737,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             sliver: SliverGrid(
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 childAspectRatio: 0.62,
                 crossAxisSpacing: 12,
@@ -885,11 +891,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 context.tr('app_title'),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              actions: [
-                // Quick Language Toggle Chip / Button
-                const ConsumerLocaleButton(),
-                const SizedBox(width: 8),
-              ],
             )
           : null,
       body: IndexedStack(
@@ -934,51 +935,6 @@ class _HomeScreenState extends State<HomeScreen> {
             label: context.tr('nav_settings'),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class ConsumerLocaleButton extends StatelessWidget {
-  const ConsumerLocaleButton({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final isBn = context.isBengali;
-    return TextButton(
-      style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      onPressed: () {
-        // Toggle language via ancestor InheritedWidget/Notifier in main.dart
-        final toggle =
-            RootAppInherited.of(context)?.localeNotifier.toggleLocale;
-        toggle?.call();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isBn ? '🇧🇩 BN' : '🇺🇸 EN',
-              style:
-                  const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              Icons.swap_horiz_rounded,
-              size: 14,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ],
-        ),
       ),
     );
   }

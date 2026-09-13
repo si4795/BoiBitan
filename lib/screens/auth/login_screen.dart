@@ -375,6 +375,13 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Prominent Language Switcher at Top Right
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: const ConsumerLocaleButton(isProminent: true),
+                  ),
+                  const SizedBox(height: 10),
+
                   // Brand Header
                   Center(
                     child: Container(
